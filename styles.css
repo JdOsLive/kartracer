@@ -1,0 +1,80 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #161b2d, #0a0b14 60%, #05060b 100%);
+  color: #e6e6f0;
+  overflow: hidden;
+}
+
+#game {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+.hud {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 10;
+  display: grid;
+  gap: 12px;
+  max-width: 320px;
+  background: rgba(10, 12, 24, 0.72);
+  border: 1px solid rgba(122, 153, 255, 0.35);
+  padding: 14px 16px;
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+
+.title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.stats {
+  display: grid;
+  gap: 6px;
+  font-size: 0.95rem;
+}
+
+.instructions {
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.instructions ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.beat {
+  display: grid;
+  gap: 6px;
+}
+
+.beat-meter {
+  position: relative;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+#beat-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 20%;
+  background: linear-gradient(90deg, #36f3ff, #8b5bff);
+  box-shadow: 0 0 12px rgba(115, 179, 255, 0.8);
+  transition: width 0.1s linear;
+}
