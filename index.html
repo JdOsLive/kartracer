@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resonance Kart</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="hud">
+    <div class="title">Resonance Kart</div>
+    <div class="stats">
+      <div>Speed: <span id="speed">0</span></div>
+      <div>Echo Orbs: <span id="orbs">0</span></div>
+      <div>Pulse: <span id="pulse">Ready</span></div>
+    </div>
+    <div class="instructions">
+      <h2>How to play</h2>
+      <ul>
+        <li>Arrow keys / WASD to steer and accelerate.</li>
+        <li>Hold <strong>Space</strong> when the beat meter peaks to trigger a Resonance Pulse.</li>
+        <li>Drive through glowing rings during a pulse to score extra speed and collect Echo Orbs.</li>
+        <li>Stay on the track — grass slows you down.</li>
+      </ul>
+    </div>
+    <div class="beat">
+      <div class="beat-label">Beat Sync</div>
+      <div class="beat-meter">
+        <div id="beat-fill"></div>
+      </div>
+    </div>
+  </div>
+  <canvas id="game"></canvas>
+  <script src="game.js"></script>
+</body>
+</html>
