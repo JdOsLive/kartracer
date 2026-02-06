@@ -11,5 +11,7 @@
 ## Controls
 
 - Arrow keys or WASD to steer and accelerate.
+- Hold **Shift** to drift and build style sparks.
+- Feather the throttle to keep your drift under control.
 - Hold **Space** when the beat meter peaks to trigger a Resonance Pulse.
 - Drive through glowing rings during a pulse to gain extra speed and collect Echo Orbs.
