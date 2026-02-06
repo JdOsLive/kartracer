@@ -9,321 +9,260 @@ const beatFill = document.getElementById("beat-fill");
 const keys = new Set();
 let lastTime = 0;
 
-const config = {
-  segmentLength: 180,
-  roadWidth: 2000,
-  cameraHeight: 1100,
-  cameraDepth: 0.85,
-  drawDistance: 240,
-  maxSpeed: 7200,
-  accel: 4200,
-  brake: 6400,
-  decel: 2400,
-  offRoadDecel: 3600,
-  driftGrip: 0.6,
-};
-
 const state = {
-  position: 0,
-  speed: 0,
-  playerX: 0,
-  drift: 0,
-  driftHeat: 0,
-  beatPhase: 0,
+  kart: {
+    x: 0,
+    y: 0,
+    angle: -Math.PI / 2,
+    speed: 0,
+  },
+  track: {
+    a: 260,
+    b: 180,
+    width: 120,
+  },
+  beat: {
+    phase: 0,
+    speed: 1.6,
+  },
+  pulse: {
+    active: false,
+    timer: 0,
+    cooldown: 0,
+  },
+  orbs: [],
+  gates: [],
   score: 0,
-  sparks: [],
-  segments: [],
 };
 
-const colors = {
-  skyTop: "#4c1c7a",
-  skyBottom: "#0a0b18",
-  roadDark: "#141427",
-  roadLight: "#1e1f38",
-  rumble: "#8bd6ff",
-  grassDark: "#0e2c25",
-  grassLight: "#123a2f",
-  lane: "rgba(255,255,255,0.2)",
-  glow: "rgba(255,255,255,0.12)",
-};
+const createOrb = (angleOffset) => ({
+  angle: angleOffset,
+  collected: false,
+});
 
-const makeSegments = () => {
-  const segments = [];
-  const total = 500;
-  for (let i = 0; i < total; i += 1) {
-    const curve = Math.sin(i / 28) * 0.9 + Math.sin(i / 11) * 0.4;
-    const hill = Math.sin(i / 18) * 80;
-    segments.push({
-      index: i,
-      curve,
-      hill,
-      color: i % 2 === 0 ? colors.roadDark : colors.roadLight,
-      grass: i % 2 === 0 ? colors.grassDark : colors.grassLight,
-    });
+const createGate = (angleOffset) => ({
+  angle: angleOffset,
+  flashed: false,
+});
+
+const initTrackItems = () => {
+  state.orbs = [];
+  state.gates = [];
+  for (let i = 0; i < 12; i += 1) {
+    state.orbs.push(createOrb((Math.PI * 2 * i) / 12));
   }
-  return segments;
-};
-
-const wrapPosition = () => {
-  const trackLength = state.segments.length * config.segmentLength;
-  state.position = (state.position + trackLength) % trackLength;
+  for (let i = 0; i < 6; i += 1) {
+    state.gates.push(createGate((Math.PI * 2 * i) / 6 + Math.PI / 12));
+  }
 };
 
 const resize = () => {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
+  state.kart.x = canvas.width / 2;
+  state.kart.y = canvas.height / 2 - state.track.b + state.track.width / 2;
 };
 
-const reset = () => {
-  state.segments = makeSegments();
-  state.position = 0;
-  state.speed = 0;
-  state.playerX = 0;
-  state.drift = 0;
-  state.driftHeat = 0;
-  state.score = 0;
-  state.sparks = [];
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const isOnTrack = (x, y) => {
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const dx = x - cx;
+  const dy = y - cy;
+  const outerA = state.track.a + state.track.width / 2;
+  const outerB = state.track.b + state.track.width / 2;
+  const innerA = state.track.a - state.track.width / 2;
+  const innerB = state.track.b - state.track.width / 2;
+  const outerValue = (dx * dx) / (outerA * outerA) + (dy * dy) / (outerB * outerB);
+  const innerValue = (dx * dx) / (innerA * innerA) + (dy * dy) / (innerB * innerB);
+  return outerValue <= 1 && innerValue >= 1;
 };
 
-const findSegment = (z) => {
-  const index = Math.floor(z / config.segmentLength) % state.segments.length;
-  return state.segments[index];
-};
-
-const project = (x, y, z) => {
-  const scale = config.cameraDepth / z;
+const pointOnCenterline = (angle) => {
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
   return {
-    x: (1 + x * scale) * canvas.width / 2,
-    y: (1 - y * scale) * canvas.height / 2,
-    w: scale * config.roadWidth * canvas.width / 2,
+    x: cx + Math.cos(angle) * state.track.a,
+    y: cy + Math.sin(angle) * state.track.b,
   };
 };
 
-const addSpark = (x, y) => {
-  state.sparks.push({
-    x,
-    y,
-    life: 0.6,
-    size: 4 + Math.random() * 4,
-    hue: 300 + Math.random() * 40,
-  });
-};
-
-const updateSparks = (dt) => {
-  state.sparks = state.sparks
-    .map((spark) => ({
-      ...spark,
-      life: spark.life - dt,
-      y: spark.y + 40 * dt,
-    }))
-    .filter((spark) => spark.life > 0);
-};
-
 const updateBeat = (dt) => {
-  state.beatPhase += dt * 3.2 + state.speed / config.maxSpeed * 3.6;
-  const value = (Math.sin(state.beatPhase) + 1) / 2;
+  state.beat.phase += dt * state.beat.speed;
+  const value = (Math.sin(state.beat.phase) + 1) / 2;
   beatFill.style.width = `${value * 100}%`;
   return value;
 };
 
-const updatePlayer = (dt) => {
-  const steerInput = (keys.has("ArrowLeft") || keys.has("a") ? -1 : 0) +
-    (keys.has("ArrowRight") || keys.has("d") ? 1 : 0);
-  const throttle = (keys.has("ArrowUp") || keys.has("w") ? 1 : 0);
-  const braking = (keys.has("ArrowDown") || keys.has("s") ? 1 : 0);
-  const drifting = keys.has("Shift");
-
-  if (throttle) {
-    state.speed += config.accel * dt;
-  } else if (braking) {
-    state.speed -= config.brake * dt;
-  } else {
-    state.speed -= config.decel * dt;
+const triggerPulse = (beatValue) => {
+  if (state.pulse.cooldown > 0 || state.pulse.active) {
+    return;
   }
-
-  state.speed = Math.max(0, Math.min(state.speed, config.maxSpeed));
-
-  const speedPercent = state.speed / config.maxSpeed;
-  const driftStrength = drifting ? 1.4 : 1;
-  const steer = steerInput * (2.2 + speedPercent * 3.4) * dt * driftStrength;
-  const grip = drifting ? config.driftGrip : 1;
-
-  state.drift += steer * (1 - grip);
-  state.drift *= 0.92;
-  state.playerX += steer * grip + state.drift * 0.4;
-
-  const maxX = 2.1;
-  if (Math.abs(state.playerX) > maxX) {
-    state.speed -= config.offRoadDecel * dt;
+  if (beatValue > 0.72) {
+    state.pulse.active = true;
+    state.pulse.timer = 2.2;
+    state.pulse.cooldown = 3.5;
   }
-
-  state.playerX = Math.max(-2.6, Math.min(2.6, state.playerX));
-
-  state.position += state.speed * dt;
-  wrapPosition();
-
-  if (drifting && state.speed > config.maxSpeed * 0.35 && Math.abs(state.drift) > 0.02) {
-    state.driftHeat = Math.min(1, state.driftHeat + dt * 1.4);
-    if (Math.random() < 0.3) {
-      addSpark(canvas.width / 2 + state.playerX * 120, canvas.height * 0.8);
-    }
-  } else {
-    state.driftHeat = Math.max(0, state.driftHeat - dt * 0.8);
-  }
-
-  state.score += Math.floor(state.speed * dt * 0.02);
 };
 
-const drawBackground = (beatValue) => {
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, colors.skyTop);
-  gradient.addColorStop(1, colors.skyBottom);
-  ctx.fillStyle = gradient;
+const updateKart = (dt, beatValue) => {
+  const steering = (keys.has("ArrowLeft") || keys.has("a") ? -1 : 0) +
+    (keys.has("ArrowRight") || keys.has("d") ? 1 : 0);
+  const throttle = (keys.has("ArrowUp") || keys.has("w") ? 1 : 0) -
+    (keys.has("ArrowDown") || keys.has("s") ? 1 : 0);
+
+  if (keys.has(" ")) {
+    triggerPulse(beatValue);
+  }
+
+  const acceleration = throttle * 260;
+  state.kart.speed += acceleration * dt;
+  state.kart.speed *= 0.98;
+  state.kart.speed = clamp(state.kart.speed, -120, 320);
+
+  const turnStrength = 2.4 + Math.abs(state.kart.speed) / 120;
+  state.kart.angle += steering * turnStrength * dt * (state.kart.speed / 200 + 0.8);
+
+  if (state.pulse.active) {
+    state.kart.speed += 120 * dt;
+  }
+
+  state.kart.x += Math.cos(state.kart.angle) * state.kart.speed * dt;
+  state.kart.y += Math.sin(state.kart.angle) * state.kart.speed * dt;
+
+  if (!isOnTrack(state.kart.x, state.kart.y)) {
+    state.kart.speed *= 0.92;
+  }
+};
+
+const updatePulse = (dt) => {
+  if (state.pulse.cooldown > 0) {
+    state.pulse.cooldown = Math.max(0, state.pulse.cooldown - dt);
+  }
+  if (state.pulse.active) {
+    state.pulse.timer -= dt;
+    if (state.pulse.timer <= 0) {
+      state.pulse.active = false;
+    }
+  }
+};
+
+const updateItems = () => {
+  state.orbs.forEach((orb) => {
+    if (orb.collected) {
+      return;
+    }
+    const pos = pointOnCenterline(orb.angle);
+    const dx = state.kart.x - pos.x;
+    const dy = state.kart.y - pos.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < 26) {
+      orb.collected = true;
+      state.score += 1;
+      state.kart.speed += 40;
+    }
+  });
+
+  state.gates.forEach((gate) => {
+    const pos = pointOnCenterline(gate.angle);
+    const dx = state.kart.x - pos.x;
+    const dy = state.kart.y - pos.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < 32 && state.pulse.active && !gate.flashed) {
+      gate.flashed = true;
+      state.kart.speed += 80;
+    }
+    if (distance > 60) {
+      gate.flashed = false;
+    }
+  });
+};
+
+const drawTrack = () => {
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+
+  ctx.fillStyle = "#0c1020";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.save();
-  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fillStyle = "#1b223a";
   ctx.beginPath();
-  ctx.arc(canvas.width * 0.78, canvas.height * 0.22, 80 + beatValue * 20, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.ellipse(cx, cy, state.track.a + state.track.width / 2, state.track.b + state.track.width / 2, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy, state.track.a - state.track.width / 2, state.track.b - state.track.width / 2, 0, 0, Math.PI * 2, true);
+  ctx.fill("evenodd");
+
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, state.track.a, state.track.b, 0, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.restore();
 };
 
-const drawRoad = () => {
-  const baseSegment = findSegment(state.position);
-  const baseIndex = baseSegment.index;
-
-  let x = 0;
-  let dx = 0;
-  let maxY = canvas.height;
-
-  for (let n = 0; n < config.drawDistance; n += 1) {
-    const segment = state.segments[(baseIndex + n) % state.segments.length];
-    const z = (n + 1) * config.segmentLength;
-    const curve = segment.curve;
-    const hill = segment.hill;
-    const segmentX = x;
-    const segmentDx = dx;
-
-    x += dx;
-    dx += curve;
-
-    const worldX = segmentX - state.playerX * config.roadWidth;
-    const worldY = hill - config.cameraHeight;
-    const projected = project(worldX, worldY, z);
-
-    if (projected.y >= maxY) {
-      continue;
+const drawItems = (beatValue) => {
+  state.orbs.forEach((orb) => {
+    if (orb.collected) {
+      return;
     }
-
-    const prevZ = n * config.segmentLength;
-    const prevX = segmentX - state.playerX * config.roadWidth;
-    const prevY = worldY + 40;
-    const prevProjected = project(prevX, prevY, prevZ + config.segmentLength);
-
-    const rumbleW = projected.w * 1.12;
-    const laneW = projected.w * 0.08;
-
-    ctx.fillStyle = segment.grass;
-    ctx.fillRect(0, projected.y, canvas.width, maxY - projected.y);
-
-    ctx.fillStyle = segment.color;
+    const pos = pointOnCenterline(orb.angle);
     ctx.beginPath();
-    ctx.moveTo(projected.x - projected.w, projected.y);
-    ctx.lineTo(projected.x + projected.w, projected.y);
-    ctx.lineTo(prevProjected.x + prevProjected.w, prevProjected.y);
-    ctx.lineTo(prevProjected.x - prevProjected.w, prevProjected.y);
-    ctx.closePath();
+    ctx.fillStyle = "rgba(108, 255, 214, 0.9)";
+    ctx.shadowColor = "rgba(108, 255, 214, 0.8)";
+    ctx.shadowBlur = 12;
+    ctx.arc(pos.x, pos.y, 12, 0, Math.PI * 2);
     ctx.fill();
+  });
 
-    ctx.fillStyle = colors.rumble;
+  state.gates.forEach((gate) => {
+    const pos = pointOnCenterline(gate.angle);
+    const glow = 0.4 + beatValue * 0.6;
     ctx.beginPath();
-    ctx.moveTo(projected.x - rumbleW, projected.y);
-    ctx.lineTo(projected.x - projected.w, projected.y);
-    ctx.lineTo(prevProjected.x - prevProjected.w, prevProjected.y);
-    ctx.lineTo(prevProjected.x - rumbleW, prevProjected.y);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(projected.x + rumbleW, projected.y);
-    ctx.lineTo(projected.x + projected.w, projected.y);
-    ctx.lineTo(prevProjected.x + prevProjected.w, prevProjected.y);
-    ctx.lineTo(prevProjected.x + rumbleW, prevProjected.y);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.strokeStyle = colors.lane;
-    ctx.lineWidth = laneW;
-    ctx.beginPath();
-    ctx.moveTo(projected.x, projected.y);
-    ctx.lineTo(prevProjected.x, prevProjected.y);
+    ctx.strokeStyle = `rgba(131, 94, 255, ${glow})`;
+    ctx.lineWidth = 5 + beatValue * 3;
+    ctx.shadowColor = "rgba(131, 94, 255, 0.7)";
+    ctx.shadowBlur = 16;
+    ctx.arc(pos.x, pos.y, 22, 0, Math.PI * 2);
     ctx.stroke();
-
-    maxY = projected.y;
-  }
-};
-
-const drawSpeedLines = (beatValue) => {
-  const count = 40;
-  ctx.save();
-  ctx.strokeStyle = `rgba(120, 226, 255, ${0.12 + beatValue * 0.2})`;
-  for (let i = 0; i < count; i += 1) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height * 0.6;
-    const length = 40 + beatValue * 80;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x, y + length);
-    ctx.stroke();
-  }
-  ctx.restore();
+  });
+  ctx.shadowBlur = 0;
 };
 
 const drawKart = () => {
-  const baseX = canvas.width / 2 + state.playerX * 120;
-  const baseY = canvas.height * 0.78;
-  const tilt = state.drift * 12;
-
   ctx.save();
-  ctx.translate(baseX, baseY);
-  ctx.rotate(tilt * 0.01);
+  ctx.translate(state.kart.x, state.kart.y);
+  ctx.rotate(state.kart.angle + Math.PI / 2);
 
-  const glow = 0.6 + state.driftHeat * 0.6;
-  ctx.shadowColor = `rgba(255, 140, 255, ${glow})`;
-  ctx.shadowBlur = 20 + state.driftHeat * 15;
-  ctx.fillStyle = state.driftHeat > 0.2 ? "#ff7cf7" : "#61d3ff";
+  ctx.fillStyle = state.pulse.active ? "#ff85f7" : "#4ed1ff";
+  ctx.shadowColor = state.pulse.active ? "rgba(255, 133, 247, 0.8)" : "rgba(78, 209, 255, 0.8)";
+  ctx.shadowBlur = state.pulse.active ? 18 : 10;
 
   ctx.beginPath();
-  ctx.moveTo(0, -50);
-  ctx.lineTo(40, 40);
-  ctx.lineTo(0, 20);
-  ctx.lineTo(-40, 40);
+  ctx.moveTo(0, -18);
+  ctx.lineTo(14, 18);
+  ctx.lineTo(0, 10);
+  ctx.lineTo(-14, 18);
   ctx.closePath();
   ctx.fill();
 
   ctx.fillStyle = "rgba(0,0,0,0.4)";
-  ctx.fillRect(-12, -6, 24, 28);
+  ctx.fillRect(-6, 0, 12, 14);
+
   ctx.restore();
+  ctx.shadowBlur = 0;
 };
 
-const drawSparks = () => {
-  state.sparks.forEach((spark) => {
-    ctx.save();
-    ctx.globalAlpha = spark.life;
-    ctx.fillStyle = `hsl(${spark.hue}, 90%, 70%)`;
-    ctx.beginPath();
-    ctx.arc(spark.x + (Math.random() - 0.5) * 8, spark.y, spark.size, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  });
-};
-
-const updateHud = (beatValue) => {
-  speedEl.textContent = Math.round(state.speed / 20);
-  orbsEl.textContent = Math.floor(state.score / 100);
-  pulseEl.textContent = state.driftHeat > 0.15 ? "Drifting" : "Grip";
-  beatFill.style.boxShadow = `0 0 ${12 + beatValue * 18}px rgba(115, 179, 255, 0.9)`;
+const drawHud = () => {
+  speedEl.textContent = Math.round(Math.abs(state.kart.speed));
+  orbsEl.textContent = state.score;
+  if (state.pulse.active) {
+    pulseEl.textContent = "Active";
+  } else if (state.pulse.cooldown > 0) {
+    pulseEl.textContent = `Cooldown ${state.pulse.cooldown.toFixed(1)}s`;
+  } else {
+    pulseEl.textContent = "Ready";
+  }
 };
 
 const tick = (time) => {
@@ -331,15 +270,14 @@ const tick = (time) => {
   lastTime = time;
 
   const beatValue = updateBeat(dt);
-  updatePlayer(dt);
-  updateSparks(dt);
+  updatePulse(dt);
+  updateKart(dt, beatValue);
+  updateItems();
 
-  drawBackground(beatValue);
-  drawRoad();
-  drawSpeedLines(beatValue);
+  drawTrack();
+  drawItems(beatValue);
   drawKart();
-  drawSparks();
-  updateHud(beatValue);
+  drawHud();
 
   requestAnimationFrame(tick);
 };
@@ -354,6 +292,6 @@ window.addEventListener("keyup", (event) => {
 
 window.addEventListener("resize", resize);
 
-reset();
+initTrackItems();
 resize();
 requestAnimationFrame(tick);
